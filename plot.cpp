@@ -1,8 +1,9 @@
 #include <QApplication>
-#include "plot.hpp"
 #include <QThread>
 #include <cstdlib>
 #include <cstring>
+#include <window.hpp>
+#include <cstdio>
 
 
 Worker::Worker()
@@ -24,8 +25,8 @@ void Worker::stream_data(UNIT u)
   int16_t *   driver_buffer[PS4000A_MAX_CHANNELS];
   int16_t *   app_buffer[PS4000A_MAX_CHANNELS];
 
-  buffer_info.unit           = u;
-  buffer_info.driver_buffers = driver_buffer;
+  buffer_info.unit            = u;
+  buffer_info.driver_buffers  = driver_buffer;
   buffer_info.app_buffers     = app_buffer;
 
 
@@ -62,6 +63,13 @@ void Worker::stream_data(UNIT u)
                       sampleCount);
 
 
+  FILE * file_ptr = fopen("data/stream.txt", "w");
+  for(int ch = 0; ch < buffer_info.unit.channelCount; ch++)
+    fprintf(file_ptr, buffer_info.unit.channelSettings[ch].enabled?"%d\t":"",
+            buffer_info.unit.channelSettings[ch].mode);
+  fprintf(file_ptr, "\n");
+
+
   do
     {
       g_ready = 0;
@@ -77,20 +85,33 @@ void Worker::stream_data(UNIT u)
             {
               for(int ch = 0; ch < buffer_info.unit.channelCount; ch++)
                 {
-                  int range       = buffer_info.unit.channelSettings[ch].range;
-                  int16_t maxBits = buffer_info.unit.maxSampleValue;
+                  if(buffer_info.unit.channelSettings[ch].enabled)
+                    {
+                      double  value = adc_to_voltage(buffer_info.unit.channelSettings[ch].range,
+                                                     buffer_info.unit.maxSampleValue,
+                                                     buffer_info.app_buffers[ch][i]);
 
-                  if(buffer_info.unit.channelSettings[ch].mode == X)
-                    x = adc_to_voltage(range, maxBits, buffer_info.app_buffers[ch][i]);
-                  if(buffer_info.unit.channelSettings[ch].mode == Y)
-                    y = adc_to_voltage(range, maxBits, buffer_info.app_buffers[ch][i]);
+                      switch(buffer_info.unit.channelSettings[ch].mode)
+                        {
+                        case X : x  = value; break;
+                        case Y : y  = value; break;
+                        case Z0: z0 = value; break;
+                        case Z1: z1 = value; break;
+                        case Z2: z2 = value; break;
+                        case Z3: z3 = value; break;
+                        case Z4: z4 = value; break;
+                        case Z5: z5 = value; break;
+                        default: break;
+                        }
+                      fprintf(file_ptr, "%f\t", value);
+                    }
                 }
               emit(data(x,y,z0,z1,z2,z3,z4,z5));
+              fprintf(file_ptr,"\n");
             }
         }
     }
   while (g_streamIsRunning);
-
 
   ps4000aStop(buffer_info.unit.handle);
   emit(unit_stopped_signal());
@@ -104,6 +125,7 @@ void Worker::stream_data(UNIT u)
           buffer_info.unit.channelSettings[ch].bufferEnabled = false;
         }
     }
+  fclose(file_ptr);
 }
 
 

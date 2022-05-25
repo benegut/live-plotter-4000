@@ -19,5 +19,5 @@ DEFINES += QCUSTOMPLOT_USE_LIBRARY
 LIBS += -L. -lqcustomplot
 LIBS += -L/opt/picoscope/lib -lps4000a
 # Input
-HEADERS += window.hpp plot.hpp
+HEADERS += window.hpp
 SOURCES += main.cpp window.cpp plot.cpp

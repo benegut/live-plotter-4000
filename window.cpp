@@ -167,7 +167,6 @@ Window::Window()
   , toolBar(new QToolBar())
   , unit(new UNIT)
   , Worker_Obj(new Worker)
-  , ChannelWindow_Obj(new ChannelWindow(unit, Worker_Obj, customPlot, colorMap))
   , loop(new QEventLoop)
 {
   Worker_Obj->moveToThread(&Thread_Obj);
@@ -242,6 +241,7 @@ void Window::start()
   get_unit_info();
   set_channels();
   set_channels_of_pico();
+  ChannelWindow_Obj = new ChannelWindow(unit, Worker_Obj, customPlot, colorMap);
   set_main_window();
   set_actions();
   set_connections();
@@ -303,20 +303,26 @@ void Window::set_main_window()
   addToolBar(toolBar);
 
   customPlot->axisRect()->setupFullAxesBox(true);
-  customPlot->setInteraction(QCP::iRangeDrag, true);
-  customPlot->setInteraction(QCP::iRangeZoom, true);
+  // customPlot->setInteraction(QCP::iRangeDrag, true);
+  // customPlot->setInteraction(QCP::iRangeZoom, true);
 
   colorMap->setGradient(QCPColorGradient::gpGrayscale);
   colorMap->setDataRange(QCPRange(-1.0, 1.0));
   colorMap->data()->setSize(200, 200);
   colorMap->data()->fill(0.0);
 
-  colorMap->data()->setRange(QCPRange(-1000.0,1000.0), QCPRange(-1000.0,1000.0));
-
-
+  customPlot->addGraph();
+  customPlot->graph(0)->setPen(QPen(QColor(40, 110, 255)));
+  QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
+  timeTicker->setTimeFormat("%h:%m:%s");
+  customPlot->xAxis->setTicker(timeTicker);
+  customPlot->yAxis->setRange(-10.2, 10.2);
+  // connect(customPlot->xAxis, SIGNAL(rangeChanged(QCPRange)),
+  //         customPlot->xAxis2, SLOT(setRange(QCPRange)));
+  // connect(customPlot->yAxis, SIGNAL(rangeChanged(QCPRange)),
+  //         customPlot->yAxis2, SLOT(setRange(QCPRange)));
 
   customPlot->replot();
-  //this->show();
 }
 
 
@@ -365,8 +371,13 @@ void Window::set_connections()
   connect(ChannelWindow_Obj, SIGNAL(do_work(UNIT)), this, SLOT(stream_button_slot()));
 
   connect(streamButton, SIGNAL(clicked()), this, SLOT(stream_button_slot()));
+  connect(saveButton, SIGNAL(clicked()), this, SLOT(save_button_slot()));
+  connect(videoButton, SIGNAL(clicked()), this, SLOT(video_button_slot()));
   connect(this, SIGNAL(do_work(UNIT)), Worker_Obj, SLOT(stream_data(UNIT)));
-  connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double)), this, SLOT(data(double,double,double,double,double,double,double,double)));
+  // connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double)),
+  //         this, SLOT(data(double,double,double,double,double,double,double,double)));
+  connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double)),
+          this, SLOT(data_debug(double,double,double,double,double,double,double,double)));
   connect(sizeBox, SIGNAL(valueChanged(int)), this, SLOT(set_size_slot(int)));
   connect(Worker_Obj, SIGNAL(unit_stopped_signal()), loop, SLOT(quit()));
 }
@@ -393,9 +404,37 @@ void Window::stream_button_slot()
       g_streamIsRunning = true;
     }
   else if(g_streamIsRunning)
-    g_streamIsRunning = false;
+    {
+      g_streamIsRunning = false;
+      videoIsRunning    = false;
+      videoButton->setText("&Video");
+    }
 
   streamButton->setText(g_streamIsRunning ? "&Stop" : "&Start");
+}
+
+
+void Window::save_button_slot()
+{
+  customPlot->savePng("images/" + QString::number(QDateTime::currentMSecsSinceEpoch()) + ".png");
+}
+
+
+void Window::video_button_slot()
+{
+  if(!videoIsRunning)
+    {
+      frameCounter = 0;
+
+      while(!videoIsRunning &&
+            QDir("videos/" + QString::number(videoCounter)).exists())
+        videoCounter++;
+      QDir().mkdir("videos/" + QString::number(videoCounter));
+    }
+
+  videoIsRunning = !videoIsRunning;
+
+  videoButton->setText(videoIsRunning ? "&Running..." : "&Video");
 
 }
 
@@ -409,8 +448,30 @@ void Window::data(double x, double y,
   colorMap->data()->coordToCell(x,y,&xInd,&yInd);
   colorMap->data()->setCell(xInd, yInd, 1.0);
   counter++;
-  if(counter%1000 == 0)
-    customPlot->replot();
+  if(counter%2000 == 0)
+    {
+      customPlot->replot();
+      if(videoIsRunning)
+        {
+          customPlot->savePng("videos/" + QString::number(videoCounter) + "/" + QString::number(frameCounter) + ".png");
+          frameCounter++;
+        }
+    }
+}
+
+
+void Window::data_debug(double x, double y,
+                        double z0, double z1,
+                        double z2, double z3,
+                        double z4, double z5)
+{
+  customPlot->graph(0)->addData((double)counter, x);
+  counter++;
+  if(counter%3000 == 0)
+    {
+      customPlot->xAxis->setRange(counter, 800, Qt::AlignRight);
+      customPlot->replot();
+    }
 }
 
 

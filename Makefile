@@ -136,8 +136,7 @@ DIST          = /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/spec_pre.prf \
 		/usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/exceptions.prf \
 		/usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/yacc.prf \
 		/usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/lex.prf \
-		live-plotter-4000.pro window.hpp \
-		plot.hpp main.cpp \
+		live-plotter-4000.pro window.hpp main.cpp \
 		window.cpp \
 		plot.cpp
 QMAKE_TARGET  = live-plotter-4000
@@ -323,7 +322,7 @@ distdir: FORCE
 	@test -d $(DISTDIR) || mkdir -p $(DISTDIR)
 	$(COPY_FILE) --parents $(DIST) $(DISTDIR)/
 	$(COPY_FILE) --parents /usr/lib/x86_64-linux-gnu/qt5/mkspecs/features/data/dummy.cpp $(DISTDIR)/
-	$(COPY_FILE) --parents window.hpp plot.hpp $(DISTDIR)/
+	$(COPY_FILE) --parents window.hpp $(DISTDIR)/
 	$(COPY_FILE) --parents main.cpp window.cpp plot.cpp $(DISTDIR)/
 
 
@@ -361,11 +360,9 @@ compiler_moc_header_clean:
 	-$(DEL_FILE) moc_window.cpp
 moc_window.cpp: window.hpp \
 		qcustomplot.h \
-		plot.hpp \
 		/opt/picoscope/include/libps4000a-1.0/ps4000aApi.h \
 		/opt/picoscope/include/libps4000a-1.0/PicoStatus.h \
 		/opt/picoscope/include/libps4000a-1.0/PicoConnectProbes.h \
-		window.hpp \
 		moc_predefs.h \
 		/usr/lib/qt5/bin/moc
 	/usr/lib/qt5/bin/moc $(DEFINES) --include /home/avs-es/Documents/C++/live-plotter-4000/moc_predefs.h -I/usr/lib/x86_64-linux-gnu/qt5/mkspecs/linux-g++ -I/home/avs-es/Documents/C++/live-plotter-4000 -I/home/avs-es/Documents/C++/live-plotter-4000 -I/opt/picoscope/include -I/usr/include/x86_64-linux-gnu/qt5 -I/usr/include/x86_64-linux-gnu/qt5/QtWidgets -I/usr/include/x86_64-linux-gnu/qt5/QtGui -I/usr/include/x86_64-linux-gnu/qt5/QtCore -I/usr/include/c++/11 -I/usr/include/x86_64-linux-gnu/c++/11 -I/usr/include/c++/11/backward -I/usr/lib/gcc/x86_64-linux-gnu/11/include -I/usr/local/include -I/usr/include/x86_64-linux-gnu -I/usr/include window.hpp -o moc_window.cpp
@@ -388,7 +385,6 @@ compiler_clean: compiler_moc_predefs_clean compiler_moc_header_clean
 
 main.o: main.cpp window.hpp \
 		qcustomplot.h \
-		plot.hpp \
 		/opt/picoscope/include/libps4000a-1.0/ps4000aApi.h \
 		/opt/picoscope/include/libps4000a-1.0/PicoStatus.h \
 		/opt/picoscope/include/libps4000a-1.0/PicoConnectProbes.h
@@ -396,18 +392,12 @@ main.o: main.cpp window.hpp \
 
 window.o: window.cpp window.hpp \
 		qcustomplot.h \
-		plot.hpp \
 		/opt/picoscope/include/libps4000a-1.0/ps4000aApi.h \
 		/opt/picoscope/include/libps4000a-1.0/PicoStatus.h \
 		/opt/picoscope/include/libps4000a-1.0/PicoConnectProbes.h
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o window.o window.cpp
 
-plot.o: plot.cpp plot.hpp \
-		/opt/picoscope/include/libps4000a-1.0/ps4000aApi.h \
-		/opt/picoscope/include/libps4000a-1.0/PicoStatus.h \
-		/opt/picoscope/include/libps4000a-1.0/PicoConnectProbes.h \
-		window.hpp \
-		qcustomplot.h
+plot.o: plot.cpp 
 	$(CXX) -c $(CXXFLAGS) $(INCPATH) -o plot.o plot.cpp
 
 moc_window.o: moc_window.cpp 

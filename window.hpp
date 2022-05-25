@@ -5,7 +5,6 @@
 #include <QSharedPointer>
 #include <QObject>
 #include "qcustomplot.h"
-#include "plot.hpp"
 #include <QToolBar>
 
 #include <libps4000a-1.0/ps4000aApi.h>
@@ -27,8 +26,6 @@ typedef enum
   {
     OFF, X, Y, Z0, Z1, Z2, Z3, Z4, Z5, Z6, Z7
   }MODE;
-
-
 
 
 typedef struct
@@ -109,10 +106,6 @@ public slots:
 
 signals:
   void                      unit_stopped_signal();
-  void                      data(int16_t, int16_t,
-                                 int16_t, int16_t,
-                                 int16_t, int16_t,
-                                 int16_t, int16_t);
   void                      data(double, double,
                                  double, double,
                                  double, double,
@@ -196,6 +189,9 @@ private:
   QAction *               show_ChannelMenu;
 
   int                     counter;
+  bool                    videoIsRunning;
+  int                     videoCounter;
+  int                     frameCounter;
 
   void                    open_unit();
   void                    get_unit_info();
@@ -209,7 +205,6 @@ private:
 
   void                    closeEvent(QCloseEvent *);
 
-
 signals:
   void                    do_work(UNIT);
 
@@ -217,15 +212,19 @@ public slots:
   void                    show_channel_menu_slot();
   void                    set_size_slot(int);
   void                    stream_button_slot();
+  void                    save_button_slot();
+  void                    video_button_slot();
   void                    data(double, double,
                                double, double,
                                double, double,
                                double, double);
+  void                    data_debug(double, double,
+                                     double, double,
+                                     double, double,
+                                     double, double);
 
 protected:
   void contextMenuEvent(QContextMenuEvent *event) override;
 };
 
 #endif //WINDOW_H
-
-
