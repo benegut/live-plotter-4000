@@ -17,42 +17,41 @@ double Worker::adc_to_voltage(int range, int16_t maxBits, int16_t bits)
   return ((double)bits/(double)maxBits)*voltages[range];
 }
 
-void Worker::stream_data(UNIT u)
+void Worker::stream_data(UNIT * unit)
 {
   BUFFER_INFO buffer_info;
+  buffer_info.unit = new UNIT[_UNITCOUNT_];
   uint32_t    sampleCount = 10000;
   uint32_t    sampleInterval = 10;
-  int16_t *   driver_buffer[PS4000A_MAX_CHANNELS];
-  int16_t *   app_buffer[PS4000A_MAX_CHANNELS];
 
-  buffer_info.unit            = u;
-  buffer_info.driver_buffers  = driver_buffer;
-  buffer_info.app_buffers     = app_buffer;
+  for(int16_t u = 0; u < _UNITCOUNT_; u++)
+    buffer_info.unit[u] = unit[u];
 
-
-
-
-  for (int ch = 0; ch < buffer_info.unit.channelCount; ch++)
+  for(int16_t u = 0; u < _UNITCOUNT_; u++)
     {
-      if(buffer_info.unit.channelSettings[ch].enabled)
+      for (int ch = 0; ch < buffer_info.unit[u].channelCount; ch++)
         {
-          driver_buffer[ch] = (int16_t*) calloc(sampleCount, sizeof(int16_t));
+          if(buffer_info.unit[u].channelSettings[ch].enabled)
+            {
+              buffer_info.unit[u].channelSettings[ch].driver_buffer = (int16_t*) calloc(sampleCount, sizeof(int16_t));
 
-          ps4000aSetDataBuffer(buffer_info.unit.handle,
-                               (PS4000A_CHANNEL)ch,
-                               driver_buffer[ch],
-                               sampleCount,
-                               0,
-                               PS4000A_RATIO_MODE_NONE);
+              ps4000aSetDataBuffer(buffer_info.unit[u].handle,
+                                   (PS4000A_CHANNEL)ch,
+                                   buffer_info.unit[u].channelSettings[ch].driver_buffer,
+                                   sampleCount,
+                                   0,
+                                   PS4000A_RATIO_MODE_NONE);
 
-          app_buffer[ch] = (int16_t*) calloc(sampleCount, sizeof(int16_t));
-          buffer_info.unit.channelSettings[ch].bufferEnabled = true;
+              buffer_info.unit[u].channelSettings[ch].app_buffer = (int16_t*) calloc(sampleCount, sizeof(int16_t));
+              buffer_info.unit[u].channelSettings[ch].bufferEnabled = true;
+            }
         }
     }
 
   g_streamIsRunning = true;
 
-  ps4000aRunStreaming(buffer_info.unit.handle,
+  for(int16_t u = 0; u < _UNITCOUNT_; u++)
+  ps4000aRunStreaming(buffer_info.unit[u].handle,
                       &sampleInterval,
                       PS4000A_US,
                       0,//preTrigger
@@ -64,9 +63,10 @@ void Worker::stream_data(UNIT u)
 
 
   FILE * file_ptr = fopen("data/stream.txt", "w");
-  for(int ch = 0; ch < buffer_info.unit.channelCount; ch++)
-    fprintf(file_ptr, buffer_info.unit.channelSettings[ch].enabled?"%d\t":"",
-            buffer_info.unit.channelSettings[ch].mode);
+  for(int16_t u = 0; u < _UNITCOUNT_; u++)
+    for(int ch = 0; ch < buffer_info.unit[u].channelCount; ch++)
+      fprintf(file_ptr, buffer_info.unit[u].channelSettings[ch].enabled?"%d\t":"",
+              buffer_info.unit[u].channelSettings[ch].mode);
   fprintf(file_ptr, "\n");
 
 
@@ -74,55 +74,65 @@ void Worker::stream_data(UNIT u)
     {
       g_ready = 0;
 
-      ps4000aGetStreamingLatestValues(buffer_info.unit.handle,
-                                      callback,
-                                      &buffer_info);
+      for(int16_t u = 0; u < _UNITCOUNT_; u++)
+        ps4000aGetStreamingLatestValues(buffer_info.unit[u].handle,
+                                        callback,
+                                        &buffer_info);
 
       if(g_ready && g_sampleCount > 0)
         {
-          double x,y,z0,z1,z2,z3,z4,z5;
+          double x,y,z0,z1,z2,z3,z4,z5,f0,f1;
           for(int i = g_startIndex; i < (int32_t)(g_startIndex + g_sampleCount); i++)
             {
-              for(int ch = 0; ch < buffer_info.unit.channelCount; ch++)
+              for(int16_t u = 0; u < _UNITCOUNT_; u++)
                 {
-                  if(buffer_info.unit.channelSettings[ch].enabled)
+                  for(int ch = 0; ch < buffer_info.unit[u].channelCount; ch++)
                     {
-                      double  value = adc_to_voltage(buffer_info.unit.channelSettings[ch].range,
-                                                     buffer_info.unit.maxSampleValue,
-                                                     buffer_info.app_buffers[ch][i]);
-
-                      switch(buffer_info.unit.channelSettings[ch].mode)
+                      if(buffer_info.unit[u].channelSettings[ch].enabled)
                         {
-                        case X : x  = value; break;
-                        case Y : y  = value; break;
-                        case Z0: z0 = value; break;
-                        case Z1: z1 = value; break;
-                        case Z2: z2 = value; break;
-                        case Z3: z3 = value; break;
-                        case Z4: z4 = value; break;
-                        case Z5: z5 = value; break;
-                        default: break;
+                          double  value = adc_to_voltage(buffer_info.unit[u].channelSettings[ch].range,
+                                                         buffer_info.unit[u].maxSampleValue,
+                                                         buffer_info.unit[u].channelSettings[ch].app_buffer[i]);
+
+                          switch(buffer_info.unit[u].channelSettings[ch].mode)
+                            {
+                            case X : x  = value; break;
+                            case Y : y  = value; break;
+                            case Z0: z0 = value; break;
+                            case Z1: z1 = value; break;
+                            case Z2: z2 = value; break;
+                            case Z3: z3 = value; break;
+                            case Z4: z4 = value; break;
+                            case Z5: z5 = value; break;
+                            case F0: f0 = value; break;
+                            case F1: f1 = value; break;
+                            default: break;
+                            }
+                          fprintf(file_ptr, "%f\t", value);
                         }
-                      fprintf(file_ptr, "%f\t", value);
                     }
                 }
-              emit(data(x,y,z0,z1,z2,z3,z4,z5));
+              emit(data(x,y,z0,z1,z2,z3,z4,z5,f0,f1));
               fprintf(file_ptr,"\n");
             }
         }
     }
   while (g_streamIsRunning);
 
-  ps4000aStop(buffer_info.unit.handle);
+  for(int16_t u = 0; u < _UNITCOUNT_; u++)
+    ps4000aStop(buffer_info.unit[u].handle);
   emit(unit_stopped_signal());
 
-  for (int ch = 0; ch < buffer_info.unit.channelCount; ch++)
+  for(int16_t u = 0; u < _UNITCOUNT_; u++)
     {
-      if(buffer_info.unit.channelSettings[ch].bufferEnabled)
+      for (int ch = 0; ch < buffer_info.unit[u].channelCount; ch++)
         {
-          free(driver_buffer[ch]);
-          free(app_buffer[ch]);
-          buffer_info.unit.channelSettings[ch].bufferEnabled = false;
+          if(buffer_info.unit[u].channelSettings[ch].bufferEnabled)
+            {
+              free(buffer_info.unit[u].channelSettings[ch].driver_buffer);
+              free(buffer_info.unit[u].channelSettings[ch].app_buffer);
+              buffer_info.unit[u].channelSettings[ch].bufferEnabled = false;
+            }
         }
     }
   fclose(file_ptr);
@@ -148,13 +158,16 @@ void Worker::callback(
 
   if (noOfSamples)
     {
-      for (int ch = 0; ch < buffer_info->unit.channelCount; ch++)
+      for(int16_t u = 0; u < _UNITCOUNT_; u++)
         {
-          if (buffer_info->unit.channelSettings[ch].bufferEnabled)
+          for (int ch = 0; ch < buffer_info->unit[u].channelCount; ch++)
             {
-              memcpy(&buffer_info->app_buffers[ch][startIndex],
-                     &buffer_info->driver_buffers[ch][startIndex],
-                     noOfSamples * sizeof(int16_t));
+              if (buffer_info->unit[u].channelSettings[ch].bufferEnabled)
+                {
+                  memcpy(&buffer_info->unit[u].channelSettings[ch].app_buffer[startIndex],
+                         &buffer_info->unit[u].channelSettings[ch].driver_buffer[startIndex],
+                         noOfSamples * sizeof(int16_t));
+                }
             }
         }
       g_ready = true;

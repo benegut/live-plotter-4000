@@ -3,8 +3,11 @@
 #include <QDateTime>
 #include <QString>
 #include <QCloseEvent>
-#include <cstdlib>
 #include <cstdio>
+#include <iostream>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 
 
 RangeBox::RangeBox()
@@ -21,7 +24,7 @@ RangeBox::RangeBox()
 TypeBox::TypeBox()
   : layout(new QGridLayout())
 {
-  labels = {"Off", "X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"};
+  labels = {"Off", "X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7", "F0", "F1"};
   for(auto p: labels)
     addItem(tr(p.c_str()));
 
@@ -29,21 +32,44 @@ TypeBox::TypeBox()
 }
 
 
-ChannelWindow::ChannelWindow(UNIT * u, Worker * w, QCustomPlot * p, QCPColorMap * c)
-  : layout(new QGridLayout)
-  , unit(u)
+ChannelWindow::ChannelWindow(UNIT * u, Worker * w, QCustomPlot * t, QCustomPlot * xy, QCPColorMap * c)
+  : unit(u)
   , worker(w)
   , loop(new QEventLoop)
-  , customPlot(p)
+  , timePlot(t)
+  , xyPlot(xy)
   , colorMap(c)
+  , layout(new QGridLayout)
+  , unit_Box(new QGroupBox[_UNITCOUNT_])
+  , unit_Layout(new QGridLayout[_UNITCOUNT_])
+  , channelBox(new QGroupBox*[_UNITCOUNT_])
+  , RangeBox_Obj(new RangeBox*[_UNITCOUNT_])
+  , Offset_SpinBox_Obj(new QDoubleSpinBox*[_UNITCOUNT_])
+  , TypeBox_Obj(new TypeBox*[_UNITCOUNT_])
 {
-  for(int i = 0; i<PS4000A_MAX_CHANNELS; i++)
+  for(int16_t i = 0; i < _UNITCOUNT_; i++)
     {
-      layout->addWidget(create_group_box(i), 0, i);
+      channelBox[i]         = new QGroupBox[unit[i].channelCount];
+      RangeBox_Obj[i]       = new RangeBox[unit[i].channelCount];
+      Offset_SpinBox_Obj[i] = new QDoubleSpinBox[unit[i].channelCount];
+      TypeBox_Obj[i]        = new TypeBox[unit[i].channelCount];
+    }
+
+  for(int16_t u = 0; u < _UNITCOUNT_; u++)
+    {
+      for(int ch = 0; ch < unit[u].channelCount; ch++)
+        {
+          unit_Layout[u].addWidget(create_group_box(u,ch), 0, ch);
+        }
+      unit_Box[u].setLayout(unit_Layout+u);
+      std::stringstream ss;
+      ss << "HANDLE: " << unit[u].handle << "    SERIAL: " << unit[u].serial;
+      unit_Box[u].setTitle(ss.str().c_str());
+      layout->addWidget(unit_Box+u, u, 0);
     }
 
   Update_Button = new QPushButton(tr("&Update"));
-  layout->addWidget(Update_Button, 1, PS4000A_MAX_CHANNELS-1);
+  layout->addWidget(Update_Button, _UNITCOUNT_, 0);
 
   setLayout(layout);
 
@@ -54,65 +80,73 @@ ChannelWindow::ChannelWindow(UNIT * u, Worker * w, QCustomPlot * p, QCPColorMap 
 }
 
 
-QGroupBox * ChannelWindow::create_group_box(int ch)
+QGroupBox * ChannelWindow::create_group_box(int u, int ch)
 {
   QString str('A' + ch);
-  channelBox[ch] = new QGroupBox("     " + str);
-  channelBox[ch]->setCheckable(true);
-  channelBox[ch]->setChecked(false);
-  connect(channelBox[ch], SIGNAL(clicked(bool)), this, SLOT(set_channels()));
+  channelBox[u][ch].setTitle("    " + str);
+  channelBox[u][ch].setCheckable(true);
+  channelBox[u][ch].setChecked(false);
+  connect(channelBox[u]+ch, SIGNAL(clicked(bool)), this, SLOT(set_channels()));
 
   QVBoxLayout * channelLayout = new QVBoxLayout();
 
-  RangeBox_Obj[ch] = new RangeBox();
-  channelLayout->addWidget(RangeBox_Obj[ch]);
-  connect(RangeBox_Obj[ch], SIGNAL(currentIndexChanged(int)), this, SLOT(set_channels()));
+  channelLayout->addWidget(RangeBox_Obj[u]+ch);
+  connect(RangeBox_Obj[u]+ch, SIGNAL(currentIndexChanged(int)), this, SLOT(set_channels()));
 
-  Offset_SpinBox_Obj[ch] = new QDoubleSpinBox();
-  channelLayout->addWidget(Offset_SpinBox_Obj[ch]);
-  connect(Offset_SpinBox_Obj[ch], SIGNAL(valueChanged(double)), this, SLOT(set_channels()));
+  channelLayout->addWidget(Offset_SpinBox_Obj[u]+ch);
+  connect(Offset_SpinBox_Obj[u]+ch, SIGNAL(valueChanged(double)), this, SLOT(set_channels()));
 
-  TypeBox_Obj[ch] = new TypeBox();
-  channelLayout->addWidget(TypeBox_Obj[ch]);
-  connect(TypeBox_Obj[ch], SIGNAL(currentIndexChanged(int)), this, SLOT(set_channels()));
+  channelLayout->addWidget(TypeBox_Obj[u]+ch);
+  connect(TypeBox_Obj[u]+ch, SIGNAL(currentIndexChanged(int)), this, SLOT(set_channels()));
 
-  channelBox[ch]->setLayout(channelLayout);
+  channelBox[u][ch].setLayout(channelLayout);
 
-  return channelBox[ch];
+  return channelBox[u]+ch;
 }
 
 
 void ChannelWindow::update_axis()
 {
-  double xRange, yRange;
+  double xRange, yRange, fRange;
 
-  for(int ch = 0; ch < unit->channelCount; ch++)
+  for(int u = 0; u < _UNITCOUNT_; u++)
     {
-      int range = unit->channelSettings[ch].range;
+      for(int ch = 0; ch < unit[u].channelCount; ch++)
+        {
+          int range = unit[u].channelSettings[ch].range;
 
-      if(unit->channelSettings[ch].enabled &&
-         unit->channelSettings[ch].mode == X)
-        xRange = voltages[range];
-      if(unit->channelSettings[ch].enabled &&
-              unit->channelSettings[ch].mode == Y)
-        yRange = voltages[range];
+          if(unit[u].channelSettings[ch].enabled &&
+             unit[u].channelSettings[ch].mode == X)
+            xRange = voltages[range];
+          if(unit[u].channelSettings[ch].enabled &&
+             unit[u].channelSettings[ch].mode == Y)
+            yRange = voltages[range];
+          if(unit[u].channelSettings[ch].enabled &&
+             unit[u].channelSettings[ch].mode == F0)
+            fRange = voltages[range];
+        }
     }
 
   colorMap->data()->setRange(QCPRange(-xRange,xRange), QCPRange(-yRange, yRange));
-  customPlot->rescaleAxes();
-  customPlot->replot();
+  xyPlot->rescaleAxes();
+  xyPlot->replot();
+  timePlot->yAxis->setRange(-fRange, fRange);
+  timePlot->replot();
 }
 
 
 void ChannelWindow::set_channels()
 {
-  for(int ch = 0; ch<PS4000A_MAX_CHANNELS; ch++)
+  for(int u = 0; u < _UNITCOUNT_; u++)
     {
-      unit->channelSettings[ch].enabled   = channelBox[ch]->isChecked();
-      unit->channelSettings[ch].range     = (PICO_CONNECT_PROBE_RANGE)RangeBox_Obj[ch]->currentIndex();
-      get_offset_bounds(ch);
-      unit->channelSettings[ch].offset    = (float)Offset_SpinBox_Obj[ch]->value();
-      unit->channelSettings[ch].mode      = (MODE)TypeBox_Obj[ch]->currentIndex();
+      for(int ch = 0; ch < unit[u].channelCount; ch++)
+        {
+          unit[u].channelSettings[ch].enabled   = channelBox[u][ch].isChecked();
+          unit[u].channelSettings[ch].range     = (PICO_CONNECT_PROBE_RANGE)RangeBox_Obj[u][ch].currentIndex();
+          get_offset_bounds(u, ch);
+          unit[u].channelSettings[ch].offset    = (float)Offset_SpinBox_Obj[u][ch].value();
+          unit[u].channelSettings[ch].mode      = (MODE)TypeBox_Obj[u][ch].currentIndex();
+        }
     }
   update_axis();
 }
@@ -126,48 +160,58 @@ void ChannelWindow::set_channels_of_pico()
   if(stream_was_running_flag)
     loop->exec();
 
-  for (int ch = 0; ch < unit->channelCount; ch++)
+  for(int u = 0; u < _UNITCOUNT_; u++)
     {
-      PICO_STATUS status = ps4000aSetChannel(unit->handle,
-                                             (PS4000A_CHANNEL)(PS4000A_CHANNEL_A + ch),
-                                             unit->channelSettings[ch].enabled,
-                                             unit->channelSettings[ch].coupling,
-                                             unit->channelSettings[ch].range,
-                                             unit->channelSettings[ch].offset);
+      for (int ch = 0; ch < unit[u].channelCount; ch++)
+        {
+          PICO_STATUS status = ps4000aSetChannel(unit[u].handle,
+                                                 (PS4000A_CHANNEL)(PS4000A_CHANNEL_A + ch),
+                                                 unit[u].channelSettings[ch].enabled,
+                                                 unit[u].channelSettings[ch].coupling,
+                                                 unit[u].channelSettings[ch].range,
+                                                 unit[u].channelSettings[ch].offset);
 
-      printf(status?"SetDefaults:ps4000aSetChannel------ 0x%08lx \n":"", (long unsigned int)status);
+          printf(status?"SetDefaults:ps4000aSetChannel------ 0x%08lx \n":"", (long unsigned int)status);
+        }
     }
 
   if(stream_was_running_flag)
-    emit(do_work(*unit));
+    emit(do_work(unit));
 
   this->close();
 }
 
 
-void ChannelWindow::get_offset_bounds(int ch)
+void ChannelWindow::get_offset_bounds(int u, int ch)
 {
   float min, max;
-  ps4000aGetAnalogueOffset(unit->handle,
-                           unit->channelSettings[ch].range,
-                           unit->channelSettings[ch].coupling,
+  ps4000aGetAnalogueOffset(unit[u].handle,
+                           unit[u].channelSettings[ch].range,
+                           unit[u].channelSettings[ch].coupling,
                            &max,
                            &min);
-  unit->channelSettings[ch].maxOffset = max;
-  unit->channelSettings[ch].minOffset = min;
+  unit[u].channelSettings[ch].maxOffset = max;
+  unit[u].channelSettings[ch].minOffset = min;
 
-  Offset_SpinBox_Obj[ch]->setMaximum((double)max);
-  Offset_SpinBox_Obj[ch]->setMinimum((double)min);
+  Offset_SpinBox_Obj[u][ch].setMaximum((double)max);
+  Offset_SpinBox_Obj[u][ch].setMinimum((double)min);
 }
 
 
+
+
+
+
+
+
 Window::Window()
-  : customPlot(new QCustomPlot())
-  , colorMap(new QCPColorMap(customPlot->xAxis, customPlot->yAxis))
-  , toolBar(new QToolBar())
-  , unit(new UNIT)
+  : toolBar(new QToolBar())
   , Worker_Obj(new Worker)
   , loop(new QEventLoop)
+  , splitter(new QSplitter(this))
+  , timePlot(new QCustomPlot)
+  , xyPlot(new QCustomPlot)
+  , colorMap(new QCPColorMap(xyPlot->xAxis, xyPlot->yAxis))
 {
   Worker_Obj->moveToThread(&Thread_Obj);
   Thread_Obj.start();
@@ -178,70 +222,13 @@ Window::Window()
 }
 
 
-void Window::open_unit()
-{
-  PICO_STATUS status = ps4000aOpenUnit(&(unit->handle), NULL);
-
-  if(status != PICO_OK)
-    printf("Unable to open device.\n");
-}
-
-
-void Window::get_unit_info()
-{
-  unit->minRange        = PS4000A_10MV;
-  unit->maxRange        = PS4000A_50V;
-  unit->channelCount    = PS4000A_MAX_CHANNELS;
-  ps4000aMaximumValue(unit->handle, &unit->maxSampleValue);
-  ps4000aMinimumValue(unit->handle, &unit->minSampleValue);
-
-
-  char description [11][25]= {
-    "Driver Version",
-    "USB Version",
-    "Hardware Version",
-    "Variant Info",
-    "Serial",
-    "Cal Date",
-    "Kernel",
-    "Digital H/W",
-    "Analogue H/W",
-    "Firmware 1",
-    "Firmware 2"};
-
-  int8_t line[80];
-  int16_t r;
-  PICO_STATUS status;
-
-  if (unit->handle)
-    {
-
-      for (int i = 0; i < 11; i++)
-        {
-          status = ps4000aGetUnitInfo(unit->handle,
-                                      line,
-                                      sizeof(line),
-                                      &r,
-                                      i);
-          printf("%s: %s\n", description[i], line);
-
-          if(status != PICO_OK)
-            {
-              printf("\n\nError in get_info()!\n");
-              break;
-            }
-        }
-    }
-}
-
-
 void Window::start()
 {
   open_unit();
   get_unit_info();
   set_channels();
   set_channels_of_pico();
-  ChannelWindow_Obj = new ChannelWindow(unit, Worker_Obj, customPlot, colorMap);
+  ChannelWindow_Obj = new ChannelWindow(unit, Worker_Obj, timePlot, xyPlot, colorMap);
   set_main_window();
   set_actions();
   set_connections();
@@ -250,80 +237,153 @@ void Window::start()
 }
 
 
-void Window::set_channels()
+void Window::open_unit()
 {
+  PICO_STATUS status;
 
-  for (int ch = 0; ch < unit->channelCount; ch++)
+  int16_t serialLth = 100;
+  int8_t * serials = new int8_t[serialLth];
+  ps4000aEnumerateUnits(&_UNITCOUNT_, serials, &serialLth);
+  std::cout << "\nNumber of Pico's found: " << _UNITCOUNT_ << std::endl;
+
+  unit = new UNIT[_UNITCOUNT_];
+
+  for(int16_t i = 0; i < _UNITCOUNT_; i++)
     {
-      unit->channelSettings[ch].range         = (PICO_CONNECT_PROBE_RANGE)PS4000A_5V;
-      unit->channelSettings[ch].enabled       = true;
-      unit->channelSettings[ch].bufferEnabled = false;
-      unit->channelSettings[ch].mode          = OFF;
-      unit->channelSettings[ch].offset        = 0.0;
-      unit->channelSettings[ch].maxOffset     = 0.0;
-      unit->channelSettings[ch].minOffset     = 0.0;
-      unit->channelSettings[ch].coupling      = (PS4000A_COUPLING)false;
+      int8_t j = 0;
+      do
+        {
+          if(serials[j] == 32)
+            {
+              j++;
+              continue;
+            }
+
+          unit[i].serial[j] = serials[j];
+          j++;
+        }
+      while(serials[j] != 44  && j < serialLth);
+
+      serials = serials+j+1;
+
+      status = ps4000aOpenUnit(&unit[i].handle, unit[i].serial);
+
+      if(status == PICO_OK)
+        std::cout << "Pico " << unit[i].serial << " check.\n";
+      else
+        std::cout << "Error: open_unit(): " << std::hex << status << std::endl;
     }
 }
 
 
-void Window::set_channels_of_pico()
+void Window::get_unit_info()
 {
-  for(int ch = 0; ch < unit->channelCount; ch++)
+  for(int i = 0; i < _UNITCOUNT_; i++)
     {
-      PICO_STATUS status = ps4000aSetChannel(unit->handle,
-                                 (PS4000A_CHANNEL)(PS4000A_CHANNEL_A + ch),
-                                 unit->channelSettings[ch].enabled,
-                                 unit->channelSettings[ch].coupling,
-                                 unit->channelSettings[ch].range,
-                                 unit->channelSettings[ch].offset);
-
-      printf(status?"SetDefaults:ps4000aSetChannel------ 0x%08lx \n":"", (long unsigned int)status);
+      unit[i].minRange        = PS4000A_10MV;
+      unit[i].maxRange        = PS4000A_50V;
+      unit[i].channelCount    = PS4000A_MAX_CHANNELS;
+      ps4000aMaximumValue(unit[i].handle, &unit[i].maxSampleValue);
+      ps4000aMinimumValue(unit[i].handle, &unit[i].minSampleValue);
     }
 }
 
 
-void Window::get_allowed_offset()
-{
-  for(int ch = 0; ch < unit->channelCount; ch++)
-    {
-      ps4000aGetAnalogueOffset(unit->handle,
-                               unit->channelSettings[ch].range,
-                               unit->channelSettings[ch].coupling,
-                               &unit->channelSettings[ch].maxOffset,
-                               &unit->channelSettings[ch].minOffset);
-    }
-}
+  void Window::set_channels()
+  {
+
+    for(int16_t i = 0; i < _UNITCOUNT_; i++)
+      {
+        for (int ch = 0; ch < unit[i].channelCount; ch++)
+          {
+            unit[i].channelSettings[ch].range         = (PICO_CONNECT_PROBE_RANGE)PS4000A_5V;
+            unit[i].channelSettings[ch].enabled       = true;
+            unit[i].channelSettings[ch].bufferEnabled = false;
+            unit[i].channelSettings[ch].mode          = OFF;
+            unit[i].channelSettings[ch].offset        = 0.0;
+            unit[i].channelSettings[ch].maxOffset     = 0.0;
+            unit[i].channelSettings[ch].minOffset     = 0.0;
+            unit[i].channelSettings[ch].coupling      = (PS4000A_COUPLING)false;
+          }
+      }
+  }
+
+
+  void Window::set_channels_of_pico()
+  {
+    for(int16_t i = 0; i < _UNITCOUNT_; i++)
+      {
+        for(int ch = 0; ch < unit[i].channelCount; ch++)
+          {
+            PICO_STATUS status = ps4000aSetChannel(unit[i].handle,
+                                                   (PS4000A_CHANNEL)(PS4000A_CHANNEL_A + ch),
+                                                   unit[i].channelSettings[ch].enabled,
+                                                   unit[i].channelSettings[ch].coupling,
+                                                   unit[i].channelSettings[ch].range,
+                                                   unit[i].channelSettings[ch].offset);
+
+            printf(status?"SetDefaults:ps4000aSetChannel------ 0x%08lx \n":"", (long unsigned int)status);
+          }
+      }
+  }
+
+
+  void Window::get_allowed_offset()
+  {
+    for(int16_t i = 0; i < _UNITCOUNT_; i++)
+      {
+        for(int ch = 0; ch < unit[i].channelCount; ch++)
+          {
+            ps4000aGetAnalogueOffset(unit[i].handle,
+                                     unit[i].channelSettings[ch].range,
+                                     unit[i].channelSettings[ch].coupling,
+                                     &unit[i].channelSettings[ch].maxOffset,
+                                     &unit[i].channelSettings[ch].minOffset);
+          }
+      }
+  }
 
 
 void Window::set_main_window()
 {
-  setCentralWidget(customPlot);
-  resize(800, 800);
+  splitter->addWidget(timePlot);
+  splitter->addWidget(xyPlot);
+  setCentralWidget(splitter);
+  timePlot->show();
+  xyPlot->show();
+
+  resize(1700, 800);
   addToolBar(toolBar);
 
-  customPlot->axisRect()->setupFullAxesBox(true);
-  // customPlot->setInteraction(QCP::iRangeDrag, true);
-  // customPlot->setInteraction(QCP::iRangeZoom, true);
+  timePlot->axisRect()->setupFullAxesBox(true);
+  xyPlot->axisRect()->setupFullAxesBox(true);
+
+  timePlot->setSelectionRectMode(QCP::srmCustom);
+  connect(timePlot->selectionRect(), &QCPSelectionRect::started, this, &Window::set_rawValue1);
+  connect(timePlot->selectionRect(), &QCPSelectionRect::accepted, this, &Window::set_rawValue2);
 
   colorMap->setGradient(QCPColorGradient::gpGrayscale);
   colorMap->setDataRange(QCPRange(-1.0, 1.0));
   colorMap->data()->setSize(200, 200);
   colorMap->data()->fill(0.0);
 
-  customPlot->addGraph();
-  customPlot->graph(0)->setPen(QPen(QColor(40, 110, 255)));
+  timePlot->addGraph();
+  timePlot->graph(0)->setPen(QPen(QColor(40, 110, 255)));
+  timePlot->graph(0)->valueAxis()->setVisible(true);
   QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
   timeTicker->setTimeFormat("%h:%m:%s");
-  customPlot->xAxis->setTicker(timeTicker);
-  customPlot->yAxis->setRange(-10.2, 10.2);
-  // connect(customPlot->xAxis, SIGNAL(rangeChanged(QCPRange)),
-  //         customPlot->xAxis2, SLOT(setRange(QCPRange)));
-  // connect(customPlot->yAxis, SIGNAL(rangeChanged(QCPRange)),
-  //         customPlot->yAxis2, SLOT(setRange(QCPRange)));
-
-  customPlot->replot();
+  timePlot->xAxis->setTicker(timeTicker);
+  timePlot->yAxis->setRange(-10.2, 10.2);
+  timePlot->addGraph();
+  QCPAxis * ax = new QCPAxis(timePlot->axisRect(), QCPAxis::AxisType::atLeft);
+  ax->setOffset(4);
+  ax->setVisible(true);
+  timePlot->graph(1)->setValueAxis(ax);
+  timePlot->graph(1)->valueAxis()->setRange(-10.0, 10.0);
+  timePlot->graph(1)->valueAxis()->setVisible(true);
+  timePlot->addGraph();
 }
+
 
 
 void Window::set_actions()
@@ -331,26 +391,31 @@ void Window::set_actions()
   streamButton = new QPushButton();
   streamButton->setText(g_streamIsRunning ? "&Stop" : "&Start");
   toolBar->addWidget(streamButton);
+  connect(streamButton, SIGNAL(clicked()), this, SLOT(stream_button_slot()));
+
 
   saveButton = new QPushButton(tr("&Save"));
   toolBar->addWidget(saveButton);
+  connect(saveButton, SIGNAL(clicked()), this, SLOT(save_button_slot()));
 
   videoButton = new QPushButton(tr("&Video"));
   toolBar->addWidget(videoButton);
+  connect(videoButton, SIGNAL(clicked()), this, SLOT(video_button_slot()));
 
-  scaleOffsetBox = new QDoubleSpinBox();
-  scaleOffsetBox->setMaximum(20);
-  scaleOffsetBox->setMinimum(-20);
-  scaleOffsetBox->setSingleStep(0.1);
-  scaleOffsetBox->setValue(0);
-  scaleOffsetBoxAction = toolBar->addWidget(scaleOffsetBox);
 
-  scaleAmplitudeBox = new QDoubleSpinBox();
-  scaleAmplitudeBox->setMaximum(20);
-  scaleAmplitudeBox->setMinimum(0);
-  scaleAmplitudeBox->setSingleStep(0.1);
-  scaleAmplitudeBox->setValue(1);
-  scaleAmplitudeBoxAction = toolBar->addWidget(scaleAmplitudeBox);
+  // scaleOffsetBox = new QDoubleSpinBox();
+  // scaleOffsetBox->setMaximum(20);
+  // scaleOffsetBox->setMinimum(-20);
+  // scaleOffsetBox->setSingleStep(0.1);
+  // scaleOffsetBox->setValue(0);
+  // scaleOffsetBoxAction = toolBar->addWidget(scaleOffsetBox);
+
+  // scaleAmplitudeBox = new QDoubleSpinBox();
+  // scaleAmplitudeBox->setMaximum(20);
+  // scaleAmplitudeBox->setMinimum(0);
+  // scaleAmplitudeBox->setSingleStep(0.1);
+  // scaleAmplitudeBox->setValue(1);
+  // scaleAmplitudeBoxAction = toolBar->addWidget(scaleAmplitudeBox);
 
   sizeBox = new QSpinBox();
   sizeBox->setMaximum(350);
@@ -358,28 +423,69 @@ void Window::set_actions()
   sizeBox->setSingleStep(10);
   sizeBox->setValue(200);
   sizeBoxAction = toolBar->addWidget(sizeBox);
+  connect(sizeBox, SIGNAL(valueChanged(int)), this, SLOT(set_size_slot(int)));
+
 
   show_ChannelMenu = new QAction(tr("&Channel"));
   menuBar()->addAction(show_ChannelMenu);
+  connect(show_ChannelMenu, SIGNAL(triggered()), this, SLOT(show_channel_menu_slot()));
+
+  split_screen_Action = new QAction(tr("&Split"));
+  connect(split_screen_Action, SIGNAL(triggered()), this, SLOT(split_screen()));
+
+  xyplot_screen_Action = new QAction(tr("&X-Y"));
+  connect(xyplot_screen_Action, SIGNAL(triggered()), this, SLOT(xyplot_screen()));
+
+  timeplot_screen_Action = new QAction(tr("&Time"));
+  connect(timeplot_screen_Action, SIGNAL(triggered()), this, SLOT(timeplot_screen()));
+
+  view = menuBar()->addMenu(tr("&View"));
+  view->addAction(split_screen_Action);
+  view->addAction(xyplot_screen_Action);
+  view->addAction(timeplot_screen_Action);
+
 }
 
 
 void Window::set_connections()
 {
-  connect(show_ChannelMenu, SIGNAL(triggered()), this, SLOT(show_channel_menu_slot()));
+  connect(ChannelWindow_Obj, SIGNAL(do_work(UNIT *)), this, SLOT(stream_button_slot()));
 
-  connect(ChannelWindow_Obj, SIGNAL(do_work(UNIT)), this, SLOT(stream_button_slot()));
-
-  connect(streamButton, SIGNAL(clicked()), this, SLOT(stream_button_slot()));
-  connect(saveButton, SIGNAL(clicked()), this, SLOT(save_button_slot()));
-  connect(videoButton, SIGNAL(clicked()), this, SLOT(video_button_slot()));
-  connect(this, SIGNAL(do_work(UNIT)), Worker_Obj, SLOT(stream_data(UNIT)));
+  connect(this, SIGNAL(do_work(UNIT *)), Worker_Obj, SLOT(stream_data(UNIT *)));
   // connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double)),
   //         this, SLOT(data(double,double,double,double,double,double,double,double)));
-  connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double)),
-          this, SLOT(data_debug(double,double,double,double,double,double,double,double)));
-  connect(sizeBox, SIGNAL(valueChanged(int)), this, SLOT(set_size_slot(int)));
+  connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double,double,double)),
+          this, SLOT(data_debug(double,double,double,double,double,double,double,double,double,double)));
   connect(Worker_Obj, SIGNAL(unit_stopped_signal()), loop, SLOT(quit()));
+}
+
+
+void Window::add_graph()
+{
+}
+
+
+
+void Window::set_rawValue1(QMouseEvent * event)
+{
+  rawValueAmplitude1 = timePlot->yAxis->pixelToCoord(event->y());
+}
+
+
+void Window::set_rawValue2(QRect dum, QMouseEvent * event)
+{
+  rawValueAmplitude2 = timePlot->yAxis->pixelToCoord(event->y());
+  calculate_greyscale();
+  colorMap->setDataRange(QCPRange(greyScaleOffset-greyScaleAmplitude, greyScaleOffset+greyScaleAmplitude));
+  colorMap->data()->fill(greyScaleOffset);
+  xyPlot->replot();
+}
+
+
+void Window::calculate_greyscale()
+{
+  greyScaleAmplitude = rawValueAmplitude1 > rawValueAmplitude2 ? (rawValueAmplitude1 - rawValueAmplitude2)/2.0 : (rawValueAmplitude2 - rawValueAmplitude1)/2.0;
+  greyScaleOffset = rawValueAmplitude1 > rawValueAmplitude2 ? rawValueAmplitude2+greyScaleAmplitude : rawValueAmplitude1+greyScaleAmplitude;
 }
 
 
@@ -392,7 +498,31 @@ void Window::show_channel_menu_slot()
 void Window::set_size_slot(int size)
 {
   colorMap->data()->setSize(size, size);
-  customPlot->replot();
+  xyPlot->replot();
+}
+
+
+void Window::split_screen()
+{
+  resize(1700, 800);
+  timePlot->show();
+  xyPlot->show();
+}
+
+
+void Window::timeplot_screen()
+{
+  resize(800, 800);
+  xyPlot->hide();
+  timePlot->show();
+}
+
+
+void Window::xyplot_screen()
+{
+  resize(800, 800);
+  timePlot->hide();
+  xyPlot->show();
 }
 
 
@@ -400,7 +530,7 @@ void Window::stream_button_slot()
 {
   if(!g_streamIsRunning)
     {
-      emit(do_work(*unit));
+      emit(do_work(unit));
       g_streamIsRunning = true;
     }
   else if(g_streamIsRunning)
@@ -416,7 +546,8 @@ void Window::stream_button_slot()
 
 void Window::save_button_slot()
 {
-  customPlot->savePng("images/" + QString::number(QDateTime::currentMSecsSinceEpoch()) + ".png");
+  timePlot->savePng("images/time/" + QString::number(QDateTime::currentMSecsSinceEpoch()) + ".png");
+    xyPlot->savePng("images/xy/" + QString::number(QDateTime::currentMSecsSinceEpoch()) + ".png");
 }
 
 
@@ -442,7 +573,8 @@ void Window::video_button_slot()
 void Window::data(double x, double y,
                   double z0, double z1,
                   double z2, double z3,
-                  double z4, double z5)
+                  double z4, double z5,
+                  double f0, double f1)
 {
   int xInd, yInd;
   colorMap->data()->coordToCell(x,y,&xInd,&yInd);
@@ -450,10 +582,10 @@ void Window::data(double x, double y,
   counter++;
   if(counter%2000 == 0)
     {
-      customPlot->replot();
+      xyPlot->replot();
       if(videoIsRunning)
         {
-          customPlot->savePng("videos/" + QString::number(videoCounter) + "/" + QString::number(frameCounter) + ".png");
+          xyPlot->savePng("videos/" + QString::number(videoCounter) + "/" + QString::number(frameCounter) + ".png");
           frameCounter++;
         }
     }
@@ -463,14 +595,19 @@ void Window::data(double x, double y,
 void Window::data_debug(double x, double y,
                         double z0, double z1,
                         double z2, double z3,
-                        double z4, double z5)
+                        double z4, double z5,
+                        double f0, double f1)
 {
-  customPlot->graph(0)->addData((double)counter, x);
+  int xInd, yInd;
+  timePlot->graph(0)->addData((double)counter, f0);
+  colorMap->data()->coordToCell(x,y,&xInd,&yInd);
+  colorMap->data()->setCell(xInd, yInd, f0);
   counter++;
   if(counter%3000 == 0)
     {
-      customPlot->xAxis->setRange(counter, 800, Qt::AlignRight);
-      customPlot->replot();
+      timePlot->xAxis->setRange(counter, 800, Qt::AlignRight);
+      timePlot->replot();
+      xyPlot->replot();
     }
 }
 
@@ -489,7 +626,8 @@ void Window::closeEvent(QCloseEvent *event)
       g_streamIsRunning = false;
       loop->exec();
     }
-  ps4000aCloseUnit(unit->handle);
+  for(int16_t i = 0; i < _UNITCOUNT_; i++)
+    ps4000aCloseUnit(unit[i].handle);
   Thread_Obj.quit();
   Thread_Obj.wait();
   QCoreApplication::quit();
