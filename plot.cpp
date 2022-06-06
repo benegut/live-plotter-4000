@@ -4,6 +4,7 @@
 #include <cstring>
 #include <window.hpp>
 #include <cstdio>
+#include <vector>
 
 
 Worker::Worker()
@@ -81,7 +82,8 @@ void Worker::stream_data(UNIT * unit)
 
       if(g_ready && g_sampleCount > 0)
         {
-          double x,y,z0,z1,z2,z3,z4,z5,f0,f1;
+          std::vector<double> data_vec(10);
+
           for(int i = g_startIndex; i < (int32_t)(g_startIndex + g_sampleCount); i++)
             {
               for(int16_t u = 0; u < _UNITCOUNT_; u++)
@@ -93,26 +95,12 @@ void Worker::stream_data(UNIT * unit)
                           double  value = adc_to_voltage(buffer_info.unit[u].channelSettings[ch].range,
                                                          buffer_info.unit[u].maxSampleValue,
                                                          buffer_info.unit[u].channelSettings[ch].app_buffer[i]);
-
-                          switch(buffer_info.unit[u].channelSettings[ch].mode)
-                            {
-                            case X : x  = value; break;
-                            case Y : y  = value; break;
-                            case Z0: z0 = value; break;
-                            case Z1: z1 = value; break;
-                            case Z2: z2 = value; break;
-                            case Z3: z3 = value; break;
-                            case Z4: z4 = value; break;
-                            case Z5: z5 = value; break;
-                            case F0: f0 = value; break;
-                            case F1: f1 = value; break;
-                            default: break;
-                            }
+                          data_vec[(int)buffer_info.unit[u].channelSettings[ch].mode - 1] = value;
                           fprintf(file_ptr, "%f\t", value);
                         }
                     }
                 }
-              emit(data(x,y,z0,z1,z2,z3,z4,z5,f0,f1));
+              emit(data(data_vec));
               fprintf(file_ptr,"\n");
             }
         }

@@ -8,6 +8,8 @@
 #include <ctime>
 #include <iomanip>
 #include <sstream>
+#include <string>
+#include <vector>
 
 
 RangeBox::RangeBox()
@@ -24,7 +26,7 @@ RangeBox::RangeBox()
 TypeBox::TypeBox()
   : layout(new QGridLayout())
 {
-  labels = {"Off", "X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7", "F0", "F1"};
+  labels = {"Off", "X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"};
   for(auto p: labels)
     addItem(tr(p.c_str()));
 
@@ -122,7 +124,7 @@ void ChannelWindow::update_axis()
              unit[u].channelSettings[ch].mode == Y)
             yRange = voltages[range];
           if(unit[u].channelSettings[ch].enabled &&
-             unit[u].channelSettings[ch].mode == F0)
+             unit[u].channelSettings[ch].mode == Z0)
             fRange = voltages[range];
         }
     }
@@ -216,9 +218,15 @@ Window::Window()
   Worker_Obj->moveToThread(&Thread_Obj);
   Thread_Obj.start();
   qRegisterMetaType<UNIT>();
+  qRegisterMetaType<std::vector<double>>();
 
   g_streamIsRunning = false;
   counter           = 0;
+
+  for(int mode = X; mode != Z7 + 1; mode++)
+    data_vec.push_back(0.0);
+
+  std::cout << data_vec.size() << std::endl;
 }
 
 
@@ -234,6 +242,9 @@ void Window::start()
   set_connections();
   this->show();
   ChannelWindow_Obj->show();
+  GraphWindow_Obj = new GraphWindow(this);
+  MathWindow_Obj = new MathWindow(this);
+
 }
 
 
@@ -367,22 +378,20 @@ void Window::set_main_window()
   colorMap->data()->setSize(200, 200);
   colorMap->data()->fill(0.0);
 
-  timePlot->addGraph();
-  timePlot->graph(0)->setPen(QPen(QColor(40, 110, 255)));
-  timePlot->graph(0)->valueAxis()->setVisible(true);
+  std::vector<std::string> labels = {"X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"};
+  for(auto p: labels)
+    {
+      timePlot->addGraph();
+    }
+
+  // timePlot->graph(0)->setPen(QPen(QColor(40, 110, 255)));
+  // timePlot->graph(0)->valueAxis()->setVisible(true);
   QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
   timeTicker->setTimeFormat("%h:%m:%s");
   timePlot->xAxis->setTicker(timeTicker);
   timePlot->yAxis->setRange(-10.2, 10.2);
-  timePlot->addGraph();
-  QCPAxis * ax = new QCPAxis(timePlot->axisRect(), QCPAxis::AxisType::atLeft);
-  ax->setOffset(4);
-  ax->setVisible(true);
-  timePlot->graph(1)->setValueAxis(ax);
-  timePlot->graph(1)->valueAxis()->setRange(-10.0, 10.0);
-  timePlot->graph(1)->valueAxis()->setVisible(true);
-  timePlot->addGraph();
 }
+
 
 
 
@@ -425,7 +434,6 @@ void Window::set_actions()
   sizeBoxAction = toolBar->addWidget(sizeBox);
   connect(sizeBox, SIGNAL(valueChanged(int)), this, SLOT(set_size_slot(int)));
 
-
   show_ChannelMenu = new QAction(tr("&Channel"));
   menuBar()->addAction(show_ChannelMenu);
   connect(show_ChannelMenu, SIGNAL(triggered()), this, SLOT(show_channel_menu_slot()));
@@ -444,6 +452,12 @@ void Window::set_actions()
   view->addAction(xyplot_screen_Action);
   view->addAction(timeplot_screen_Action);
 
+  graphs = new QMenu();
+  show_channel_list = new QAction(tr("&Pico Channel"));
+  show_math_channel_window = new QAction(tr("&Math Channel"));
+  graphs = menuBar()->addMenu(tr("&Graphs"));
+  graphs->addAction(show_channel_list);
+  graphs->addAction(show_math_channel_window);
 }
 
 
@@ -452,16 +466,10 @@ void Window::set_connections()
   connect(ChannelWindow_Obj, SIGNAL(do_work(UNIT *)), this, SLOT(stream_button_slot()));
 
   connect(this, SIGNAL(do_work(UNIT *)), Worker_Obj, SLOT(stream_data(UNIT *)));
-  // connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double)),
-  //         this, SLOT(data(double,double,double,double,double,double,double,double)));
-  connect(Worker_Obj, SIGNAL(data(double,double,double,double,double,double,double,double,double,double)),
-          this, SLOT(data_debug(double,double,double,double,double,double,double,double,double,double)));
+
+  connect(Worker_Obj, SIGNAL(data(std::vector<double>)), this, SLOT(data(std::vector<double>)));
+
   connect(Worker_Obj, SIGNAL(unit_stopped_signal()), loop, SLOT(quit()));
-}
-
-
-void Window::add_graph()
-{
 }
 
 
@@ -570,46 +578,30 @@ void Window::video_button_slot()
 }
 
 
-void Window::data(double x, double y,
-                  double z0, double z1,
-                  double z2, double z3,
-                  double z4, double z5,
-                  double f0, double f1)
+void Window::data(std::vector<double> d)
 {
+  data_vec = d;
   int xInd, yInd;
-  colorMap->data()->coordToCell(x,y,&xInd,&yInd);
-  colorMap->data()->setCell(xInd, yInd, 1.0);
-  counter++;
-  if(counter%2000 == 0)
-    {
-      xyPlot->replot();
-      if(videoIsRunning)
-        {
-          xyPlot->savePng("videos/" + QString::number(videoCounter) + "/" + QString::number(frameCounter) + ".png");
-          frameCounter++;
-        }
-    }
-}
+  for(int i = 0; i < 10; i++)
+    timePlot->graph(i)->addData((double)counter, data_vec[i]);
 
-
-void Window::data_debug(double x, double y,
-                        double z0, double z1,
-                        double z2, double z3,
-                        double z4, double z5,
-                        double f0, double f1)
-{
-  int xInd, yInd;
-  timePlot->graph(0)->addData((double)counter, f0);
-  colorMap->data()->coordToCell(x,y,&xInd,&yInd);
-  colorMap->data()->setCell(xInd, yInd, f0);
+  colorMap->data()->coordToCell(data_vec[X+1],data_vec[Y+1],&xInd,&yInd);
+  colorMap->data()->setCell(xInd, yInd, data_vec[Z0+1]);
   counter++;
   if(counter%3000 == 0)
     {
       timePlot->xAxis->setRange(counter, 800, Qt::AlignRight);
       timePlot->replot();
       xyPlot->replot();
+
+      // if(videoIsRunning)
+      //   {
+      //     xyPlot->savePng("videos/" + QString::number(videoCounter) + "/" + QString::number(frameCounter) + ".png");
+      //     frameCounter++;
+      //   }
     }
 }
+
 
 
 void Window::contextMenuEvent(QContextMenuEvent *event)
@@ -633,3 +625,126 @@ void Window::closeEvent(QCloseEvent *event)
   QCoreApplication::quit();
   event->accept();
 }
+
+
+
+GraphWindow::GraphWindow(Window * parent)
+  : layout(new QGridLayout)
+  , parent(parent)
+{
+  std::vector<std::string> labels = {"X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"};
+  for(auto p: labels)
+    {
+      QCheckBox * ptr = new QCheckBox(tr(p.c_str()));
+      layout->addWidget(ptr);
+      connect(ptr, SIGNAL(stateChanged(int)), this, SLOT(update_graphs()));
+    }
+
+  setLayout(layout);
+
+  connect(parent->show_channel_list, SIGNAL(triggered()), this, SLOT(show()));
+}
+
+
+void GraphWindow::update_graphs()
+{
+  int rows = layout->rowCount();
+  for(int i = 0; i < rows; i++)
+    {
+      if(dynamic_cast<QCheckBox*>(layout->itemAtPosition(i,0)->widget())->isChecked())
+        parent->timePlot->graph(i)->setVisible(true);
+      else
+        parent->timePlot->graph(i)->setVisible(false);
+    }
+}
+
+
+
+MathWindow::MathWindow(Window * parent)
+  : parent(parent)
+  , layout(new QGridLayout)
+  , entryField(new QLineEdit)
+  , eval_button(new QPushButton(tr("&Eval")))
+  , map(new QMap<QString, Equation*>)
+{
+  layout->addWidget(entryField, 0, 0);
+  layout->addWidget(eval_button, 0, 1);
+  setLayout(layout);
+
+  connect(eval_button, SIGNAL(clicked()), this, SLOT(eval_slot()));
+  connect(parent->show_math_channel_window, SIGNAL(triggered()), this, SLOT(show()));
+}
+
+
+void MathWindow::eval_slot()
+{
+  if(!map->contains(entryField->text()))
+    map->insert(entryField->text(), new Equation(entryField->text(), this));
+
+  //resize(minimumSizeHint());
+}
+
+
+
+Equation::Equation(QString equation_str, MathWindow * parent)
+  : parent(parent)
+  , equation_str(equation_str)
+  , layout(new QGridLayout)
+  , box(new QGroupBox(equation_str, this))
+  , symbol_table(new exprtk::symbol_table<double>)
+  , expression(new exprtk::expression<double>)
+  , parser(new exprtk::parser<double>)
+  , params(std::vector<double>(1000))
+{
+  int i = 0;
+  for(auto c: equation_str)
+    {
+      QString str(c);
+
+      if(str.contains(QRegExp("[a-m]")))
+        {
+          QSlider * slider = new QSlider(Qt::Vertical, this);
+          slider->setMaximum(100);
+          slider->setMinimum(-100);
+          slider->setSliderPosition(2);
+          layout->addWidget(slider, 1, layout->columnCount());
+          slider->show();
+          connect(slider, &QSlider::valueChanged, [this, slider, equation_str, i, c](){this->params[i] = (double)slider->value();
+              std::cout << this->expression->value() << "\n";});
+
+          QLabel *  label  = new QLabel(QString(c), this);
+          layout->addWidget(label, 0, layout->columnCount());
+
+          if(!symbol_table->add_variable(QString(c).toStdString(), params[i]))
+            std::cout << "Error in symbol table\n";
+          i++;
+        }
+    }
+
+  QRegExp rx("[x-z][0-7]{0,1}");
+  int pos = 0;
+  QStringList list;
+  while((pos = rx.indexIn(equation_str, pos)) != -1)
+    {
+      std::string str = rx.cap(0).toStdString();
+      if(str=="x"){symbol_table->add_variable(str, parent->parent->data_vec[X-1]); break;}
+      if(str=="y"){symbol_table->add_variable(str, parent->parent->data_vec[Y-1]); break;}
+      if(str=="z0"){symbol_table->add_variable(str, parent->parent->data_vec[Z0-1]); break;}
+      if(str=="z1"){symbol_table->add_variable(str, parent->parent->data_vec[Z1-1]); break;}
+      if(str=="z2"){symbol_table->add_variable(str, parent->parent->data_vec[Z2-1]); break;}
+      if(str=="z3"){symbol_table->add_variable(str, parent->parent->data_vec[Z3-1]); break;}
+      if(str=="z4"){symbol_table->add_variable(str, parent->parent->data_vec[Z4-1]); break;}
+      if(str=="z5"){symbol_table->add_variable(str, parent->parent->data_vec[Z5-1]); break;}
+      if(str=="z6"){symbol_table->add_variable(str, parent->parent->data_vec[Z6-1]); break;}
+      if(str=="z7"){symbol_table->add_variable(str, parent->parent->data_vec[Z7-1]); break;}
+      pos += rx.matchedLength();
+    }
+
+  expression->register_symbol_table(*symbol_table);
+  if(!parser->compile(equation_str.toStdString(), *expression))
+    printf("Error: %s\n", parser->error().c_str());
+
+  box->setLayout(layout);
+  parent->layout->addWidget(box);
+}
+

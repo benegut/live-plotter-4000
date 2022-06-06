@@ -14,6 +14,8 @@
 
 #include <string>
 #include <vector>
+#include "exprtk.hpp"
+
 
 
 inline int16_t    _UNITCOUNT_;
@@ -26,7 +28,7 @@ inline bool       g_ready;
 
 typedef enum
   {
-    OFF, X, Y, Z0, Z1, Z2, Z3, Z4, Z5, Z6, Z7, F0, F1
+    OFF, X, Y, Z0, Z1, Z2, Z3, Z4, Z5, Z6, Z7
   }MODE;
 
 
@@ -109,28 +111,13 @@ public slots:
 
 signals:
   void                      unit_stopped_signal();
-  void                      data(double, double,
-                                 double, double,
-                                 double, double,
-                                 double, double,
-                                 double, double);
+
+  void                      data(std::vector<double>);
 };
 
 
 
-
-class TimePlot : public QCustomPlot
-{
-};
-
-
-
-
-
-class XYPlot : public QCustomPlot
-{
-};
-
+class Window;
 
 
 class ChannelWindow : public QWidget
@@ -171,6 +158,64 @@ signals:
 };
 
 
+class GraphWindow : public QWidget
+{
+  Q_OBJECT
+
+public:
+  GraphWindow(Window *);
+  QGridLayout *                 layout;
+
+private:
+  Window *                parent;
+
+public slots:
+  void                    update_graphs();
+};
+
+
+class MathWindow;
+
+
+
+
+class Equation : public QWidget
+{
+  Q_OBJECT
+
+public:
+  Equation(QString, MathWindow *);
+  QGridLayout * layout;
+  QGroupBox *   box;
+  exprtk::symbol_table<double>  * symbol_table;
+  exprtk::expression<double>    * expression;
+  exprtk::parser<double>        * parser;
+
+
+private:
+  QString                     equation_str;
+  MathWindow *                parent;
+  std::vector<double>         params;
+
+};
+
+
+
+class MathWindow : public QWidget
+{
+  Q_OBJECT
+
+  public:
+  MathWindow(Window *);
+  Window *                    parent;
+  QGridLayout *               layout;
+  QLineEdit *                 entryField;
+  QPushButton *               eval_button;
+  QMap<QString, Equation*> *  map;
+
+public slots:
+  void                    eval_slot();
+};
 
 
 
@@ -184,7 +229,7 @@ public:
   void                    start();
 
 
-private:
+public:
   Worker *                Worker_Obj;
   QThread                 Thread_Obj;
   QEventLoop *            loop;
@@ -196,6 +241,8 @@ private:
   QToolBar *              toolBar;
 
   UNIT *                  unit;
+
+  std::vector<double>     data_vec;
 
   QPushButton *           streamButton;
   QPushButton *           saveButton;
@@ -217,6 +264,15 @@ private:
   QAction *               split_screen_Action;
   QAction *               timeplot_screen_Action;
   QAction *               xyplot_screen_Action;
+  QMenu *                 graphs;
+
+  GraphWindow *           GraphWindow_Obj;
+  MathWindow *            MathWindow_Obj;
+
+public:
+  QAction *               show_channel_list;
+  QAction *               show_math_channel_window;
+
 
   int                     counter;
   bool                    videoIsRunning;
@@ -232,7 +288,6 @@ private:
   void                    set_main_window();
   void                    set_actions();
   void                    set_connections();
-  void                    add_graph();
 
   void                    calculate_greyscale();
 
@@ -252,16 +307,7 @@ public slots:
   void                    stream_button_slot();
   void                    save_button_slot();
   void                    video_button_slot();
-  void                    data(double, double,
-                               double, double,
-                               double, double,
-                               double, double,
-                               double, double);
-  void                    data_debug(double, double,
-                                     double, double,
-                                     double, double,
-                                     double, double,
-                                     double, double);
+  void                    data(std::vector<double>);
 
 protected:
   void contextMenuEvent(QContextMenuEvent *event) override;
