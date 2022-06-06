@@ -26,7 +26,7 @@ RangeBox::RangeBox()
 TypeBox::TypeBox()
   : layout(new QGridLayout())
 {
-  labels = {"Off", "X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"};
+  labels = {"Off", "X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7", "Z8", "Z9"};
   for(auto p: labels)
     addItem(tr(p.c_str()));
 
@@ -109,7 +109,7 @@ QGroupBox * ChannelWindow::create_group_box(int u, int ch)
 
 void ChannelWindow::update_axis()
 {
-  double xRange, yRange, fRange;
+  double xRange, yRange, fRange = 0.0;
 
   for(int u = 0; u < _UNITCOUNT_; u++)
     {
@@ -124,8 +124,8 @@ void ChannelWindow::update_axis()
              unit[u].channelSettings[ch].mode == Y)
             yRange = voltages[range];
           if(unit[u].channelSettings[ch].enabled &&
-             unit[u].channelSettings[ch].mode == Z0)
-            fRange = voltages[range];
+             unit[u].channelSettings[ch].mode >= Z0)
+             fRange = voltages[range]>fRange?voltages[range]:fRange;
         }
     }
 
@@ -205,7 +205,6 @@ void ChannelWindow::get_offset_bounds(int u, int ch)
 
 
 
-
 Window::Window()
   : toolBar(new QToolBar())
   , Worker_Obj(new Worker)
@@ -214,6 +213,7 @@ Window::Window()
   , timePlot(new QCustomPlot)
   , xyPlot(new QCustomPlot)
   , colorMap(new QCPColorMap(xyPlot->xAxis, xyPlot->yAxis))
+  , mathChannel_vec(QVector<double>(30))
 {
   Worker_Obj->moveToThread(&Thread_Obj);
   Thread_Obj.start();
@@ -223,10 +223,10 @@ Window::Window()
   g_streamIsRunning = false;
   counter           = 0;
 
-  for(int mode = X; mode != Z7 + 1; mode++)
+  for(int mode = X; mode != Z9 + 1; mode++)
     data_vec.push_back(0.0);
 
-  std::cout << data_vec.size() << std::endl;
+  colorMapData_ptr = &data_vec[Z0-1];
 }
 
 
@@ -244,6 +244,7 @@ void Window::start()
   ChannelWindow_Obj->show();
   GraphWindow_Obj = new GraphWindow(this);
   MathWindow_Obj = new MathWindow(this);
+  ColorMapDataChooser_Obj = new ColorMapDataChooser(this);
 
 }
 
@@ -367,7 +368,11 @@ void Window::set_main_window()
   addToolBar(toolBar);
 
   timePlot->axisRect()->setupFullAxesBox(true);
+  timePlot->setInteraction(QCP::iRangeZoom, true);
+  timePlot->setInteraction(QCP::iRangeDrag, true);
   xyPlot->axisRect()->setupFullAxesBox(true);
+  xyPlot->setInteraction(QCP::iRangeZoom, true);
+  xyPlot->setInteraction(QCP::iRangeDrag, true);
 
   timePlot->setSelectionRectMode(QCP::srmCustom);
   connect(timePlot->selectionRect(), &QCPSelectionRect::started, this, &Window::set_rawValue1);
@@ -378,14 +383,13 @@ void Window::set_main_window()
   colorMap->data()->setSize(200, 200);
   colorMap->data()->fill(0.0);
 
-  std::vector<std::string> labels = {"X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"};
+  std::vector<std::string> labels = {"X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7", "Z8", "Z9"};
   for(auto p: labels)
     {
       timePlot->addGraph();
     }
 
   // timePlot->graph(0)->setPen(QPen(QColor(40, 110, 255)));
-  // timePlot->graph(0)->valueAxis()->setVisible(true);
   QSharedPointer<QCPAxisTickerTime> timeTicker(new QCPAxisTickerTime);
   timeTicker->setTimeFormat("%h:%m:%s");
   timePlot->xAxis->setTicker(timeTicker);
@@ -455,20 +459,19 @@ void Window::set_actions()
   graphs = new QMenu();
   show_channel_list = new QAction(tr("&Pico Channel"));
   show_math_channel_window = new QAction(tr("&Math Channel"));
+  ColorMapDataChooser_Action = new QAction(tr("&XY-Signal"));
   graphs = menuBar()->addMenu(tr("&Graphs"));
   graphs->addAction(show_channel_list);
   graphs->addAction(show_math_channel_window);
+  graphs->addAction(ColorMapDataChooser_Action);
 }
 
 
 void Window::set_connections()
 {
   connect(ChannelWindow_Obj, SIGNAL(do_work(UNIT *)), this, SLOT(stream_button_slot()));
-
   connect(this, SIGNAL(do_work(UNIT *)), Worker_Obj, SLOT(stream_data(UNIT *)));
-
   connect(Worker_Obj, SIGNAL(data(std::vector<double>)), this, SLOT(data(std::vector<double>)));
-
   connect(Worker_Obj, SIGNAL(unit_stopped_signal()), loop, SLOT(quit()));
 }
 
@@ -582,11 +585,19 @@ void Window::data(std::vector<double> d)
 {
   data_vec = d;
   int xInd, yInd;
-  for(int i = 0; i < 10; i++)
-    timePlot->graph(i)->addData((double)counter, data_vec[i]);
 
-  colorMap->data()->coordToCell(data_vec[X+1],data_vec[Y+1],&xInd,&yInd);
-  colorMap->data()->setCell(xInd, yInd, data_vec[Z0+1]);
+  for(int i = X; i < Z9+1; i++)
+    timePlot->graph(i-1)->addData((double)counter, data_vec[i-1]);
+
+  for(auto e : expression_vec.keys())
+    {
+      double val = e->value();
+      timePlot->graph(expression_vec.value(e))->addData((double)counter, val);
+      mathChannel_vec[expression_vec.value(e)] = val;
+    }
+
+  colorMap->data()->coordToCell(data_vec[X-1],data_vec[Y-1],&xInd,&yInd);
+  colorMap->data()->setCell(xInd, yInd, *colorMapData_ptr);
   counter++;
   if(counter%3000 == 0)
     {
@@ -594,12 +605,15 @@ void Window::data(std::vector<double> d)
       timePlot->replot();
       xyPlot->replot();
 
-      // if(videoIsRunning)
-      //   {
-      //     xyPlot->savePng("videos/" + QString::number(videoCounter) + "/" + QString::number(frameCounter) + ".png");
-      //     frameCounter++;
-      //   }
+      if(videoIsRunning)
+        {
+          xyPlot->savePng("videos/" + QString::number(videoCounter) + "/" + QString::number(frameCounter) + ".png");
+          frameCounter++;
+        }
     }
+  if(counter%1000000 == 0)
+    for(int i = 0; i < timePlot->graphCount(); i++)
+      timePlot->graph(i)->data()->clear();
 }
 
 
@@ -632,7 +646,7 @@ GraphWindow::GraphWindow(Window * parent)
   : layout(new QGridLayout)
   , parent(parent)
 {
-  std::vector<std::string> labels = {"X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7"};
+  std::vector<std::string> labels = {"X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7", "Z8", "Z9"};
   for(auto p: labels)
     {
       QCheckBox * ptr = new QCheckBox(tr(p.c_str()));
@@ -680,8 +694,6 @@ void MathWindow::eval_slot()
 {
   if(!map->contains(entryField->text()))
     map->insert(entryField->text(), new Equation(entryField->text(), this));
-
-  //resize(minimumSizeHint());
 }
 
 
@@ -697,46 +709,51 @@ Equation::Equation(QString equation_str, MathWindow * parent)
   , params(std::vector<double>(1000))
 {
   int i = 0;
+  QVector<QString>            tracker;
   for(auto c: equation_str)
     {
       QString str(c);
 
-      if(str.contains(QRegExp("[a-m]")))
+      if(str.contains(QRegExp("[a-m]")) && !tracker.contains(str))
         {
+          tracker.push_back(str);
+
           QSlider * slider = new QSlider(Qt::Vertical, this);
           slider->setMaximum(100);
           slider->setMinimum(-100);
           slider->setSliderPosition(2);
           layout->addWidget(slider, 1, layout->columnCount());
           slider->show();
-          connect(slider, &QSlider::valueChanged, [this, slider, equation_str, i, c](){this->params[i] = (double)slider->value();
-              std::cout << this->expression->value() << "\n";});
+          connect(slider, &QSlider::valueChanged, [this, slider, equation_str, i, c](){this->params[i] = (double)slider->value();});
 
-          QLabel *  label  = new QLabel(QString(c), this);
+          QLabel *  label  = new QLabel(str, this);
           layout->addWidget(label, 0, layout->columnCount());
 
-          if(!symbol_table->add_variable(QString(c).toStdString(), params[i]))
+          if(!symbol_table->add_variable(str.toStdString(), params[i]))
             std::cout << "Error in symbol table\n";
           i++;
         }
     }
 
-  QRegExp rx("[x-z][0-7]{0,1}");
+  QRegExp rx("[x-z][0-7]");
   int pos = 0;
   QStringList list;
-  while((pos = rx.indexIn(equation_str, pos)) != -1)
+  while(((pos = rx.indexIn(equation_str, pos)) != -1) && !tracker.contains(rx.cap(0)))
     {
-      std::string str = rx.cap(0).toStdString();
-      if(str=="x"){symbol_table->add_variable(str, parent->parent->data_vec[X-1]); break;}
-      if(str=="y"){symbol_table->add_variable(str, parent->parent->data_vec[Y-1]); break;}
-      if(str=="z0"){symbol_table->add_variable(str, parent->parent->data_vec[Z0-1]); break;}
-      if(str=="z1"){symbol_table->add_variable(str, parent->parent->data_vec[Z1-1]); break;}
-      if(str=="z2"){symbol_table->add_variable(str, parent->parent->data_vec[Z2-1]); break;}
-      if(str=="z3"){symbol_table->add_variable(str, parent->parent->data_vec[Z3-1]); break;}
-      if(str=="z4"){symbol_table->add_variable(str, parent->parent->data_vec[Z4-1]); break;}
-      if(str=="z5"){symbol_table->add_variable(str, parent->parent->data_vec[Z5-1]); break;}
-      if(str=="z6"){symbol_table->add_variable(str, parent->parent->data_vec[Z6-1]); break;}
-      if(str=="z7"){symbol_table->add_variable(str, parent->parent->data_vec[Z7-1]); break;}
+      tracker.push_back(rx.cap(0));
+      std::string str = rx.cap(0).toStdString().c_str();
+      if(str=="x0"){symbol_table->add_variable(str, parent->parent->data_vec[X-1]);}
+      if(str=="y0"){symbol_table->add_variable(str, parent->parent->data_vec[Y-1]);}
+      if(str=="z0"){symbol_table->add_variable(str, parent->parent->data_vec[Z0-1]);}
+      if(str=="z1"){symbol_table->add_variable(str, parent->parent->data_vec[Z1-1]);}
+      if(str=="z2"){symbol_table->add_variable(str, parent->parent->data_vec[Z2-1]);}
+      if(str=="z3"){symbol_table->add_variable(str, parent->parent->data_vec[Z3-1]);}
+      if(str=="z4"){symbol_table->add_variable(str, parent->parent->data_vec[Z4-1]);}
+      if(str=="z5"){symbol_table->add_variable(str, parent->parent->data_vec[Z5-1]);}
+      if(str=="z6"){symbol_table->add_variable(str, parent->parent->data_vec[Z6-1]);}
+      if(str=="z7"){symbol_table->add_variable(str, parent->parent->data_vec[Z7-1]);}
+      if(str=="z8"){symbol_table->add_variable(str, parent->parent->data_vec[Z8-1]);}
+      if(str=="z9"){symbol_table->add_variable(str, parent->parent->data_vec[Z9-1]);}
       pos += rx.matchedLength();
     }
 
@@ -744,7 +761,53 @@ Equation::Equation(QString equation_str, MathWindow * parent)
   if(!parser->compile(equation_str.toStdString(), *expression))
     printf("Error: %s\n", parser->error().c_str());
 
+  parent->parent->timePlot->addGraph();
+  parent->parent->expression_vec.insert(expression, parent->parent->timePlot->graphCount()-1);
+  parent->parent->ColorMapDataChooser_Obj->expression_vec.insert(expression, equation_str);
+  parent->parent->ColorMapDataChooser_Obj->update_buttons();
+
   box->setLayout(layout);
   parent->layout->addWidget(box);
 }
 
+
+
+ColorMapDataChooser::ColorMapDataChooser(Window * parent)
+  : parent(parent)
+  , layout(new QVBoxLayout)
+{
+  std::vector<std::string> labels = {"X", "Y", "Z0", "Z1", "Z2", "Z3", "Z4", "Z5", "Z6", "Z7", "Z8", "Z9"};
+  for(auto p: labels)
+    {
+      QRadioButton * ptr = new QRadioButton(tr(p.c_str()), this);
+      layout->addWidget(ptr);
+      connect(ptr, &QRadioButton::toggled, this, &ColorMapDataChooser::check_buttons_channel);
+    }
+  setLayout(layout);
+  connect(parent->ColorMapDataChooser_Action, SIGNAL(triggered()), this, SLOT(show()));
+}
+
+
+void ColorMapDataChooser::check_buttons_channel()
+{
+  for(int i = X; i < Z9+1; i++)
+    if(((QRadioButton*)layout->itemAt(i-1)->widget())->isChecked())
+      parent->colorMapData_ptr = (double*)&parent->data_vec[i-1];
+}
+
+
+void ColorMapDataChooser::check_buttons_math()
+{
+  for(int i = Z9; i < expression_vec.size()+Z9; i++)
+    if(((QRadioButton*)layout->itemAt(i)->widget())->isChecked())
+      parent->colorMapData_ptr = &parent->mathChannel_vec[i];
+}
+
+
+void ColorMapDataChooser::update_buttons()
+{
+  exprtk::expression<double>* e = expression_vec.lastKey();
+  QRadioButton * ptr = new QRadioButton(tr(expression_vec.value(e).toStdString().c_str()));
+  layout->addWidget(ptr);
+  connect(ptr, &QRadioButton::toggled, this, &ColorMapDataChooser::check_buttons_math);
+}

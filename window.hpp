@@ -28,7 +28,7 @@ inline bool       g_ready;
 
 typedef enum
   {
-    OFF, X, Y, Z0, Z1, Z2, Z3, Z4, Z5, Z6, Z7
+    OFF, X, Y, Z0, Z1, Z2, Z3, Z4, Z5, Z6, Z7, Z8, Z9
   }MODE;
 
 
@@ -219,6 +219,27 @@ public slots:
 
 
 
+class ColorMapDataChooser : public QWidget
+{
+  Q_OBJECT
+
+public:
+  ColorMapDataChooser(Window *);
+  QVBoxLayout *                             layout;
+  QMap<QString, int>                        channel_map;
+  QMap<exprtk::expression<double>*, QString>    expression_vec;
+
+
+private:
+  Window *            parent;
+
+public slots:
+  void                                      check_buttons_channel();
+  void                                      update_buttons();
+  void                                      check_buttons_math();
+};
+
+
 
 class Window : public QMainWindow
 {
@@ -268,6 +289,14 @@ public:
 
   GraphWindow *           GraphWindow_Obj;
   MathWindow *            MathWindow_Obj;
+
+  QMap<exprtk::expression<double>*, int>   expression_vec;
+
+  double *                colorMapData_ptr;
+  QVector<double>         mathChannel_vec;
+
+  ColorMapDataChooser *   ColorMapDataChooser_Obj;
+  QAction *               ColorMapDataChooser_Action;
 
 public:
   QAction *               show_channel_list;

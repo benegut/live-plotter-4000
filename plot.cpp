@@ -3,7 +3,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <window.hpp>
-#include <cstdio>
 #include <vector>
 
 
@@ -17,6 +16,8 @@ double Worker::adc_to_voltage(int range, int16_t maxBits, int16_t bits)
 {
   return ((double)bits/(double)maxBits)*voltages[range];
 }
+
+
 
 void Worker::stream_data(UNIT * unit)
 {
@@ -63,12 +64,12 @@ void Worker::stream_data(UNIT * unit)
                       sampleCount);
 
 
-  FILE * file_ptr = fopen("data/stream.txt", "w");
-  for(int16_t u = 0; u < _UNITCOUNT_; u++)
-    for(int ch = 0; ch < buffer_info.unit[u].channelCount; ch++)
-      fprintf(file_ptr, buffer_info.unit[u].channelSettings[ch].enabled?"%d\t":"",
-              buffer_info.unit[u].channelSettings[ch].mode);
-  fprintf(file_ptr, "\n");
+  // FILE * file_ptr = fopen("data/stream.txt", "w");
+  // for(int16_t u = 0; u < _UNITCOUNT_; u++)
+  //   for(int ch = 0; ch < buffer_info.unit[u].channelCount; ch++)
+  //     fprintf(file_ptr, buffer_info.unit[u].channelSettings[ch].enabled?"%d\t":"",
+  //             buffer_info.unit[u].channelSettings[ch].mode);
+  // fprintf(file_ptr, "\n");
 
 
   do
@@ -82,7 +83,7 @@ void Worker::stream_data(UNIT * unit)
 
       if(g_ready && g_sampleCount > 0)
         {
-          std::vector<double> data_vec(10);
+          std::vector<double> data_vec(12);
 
           for(int i = g_startIndex; i < (int32_t)(g_startIndex + g_sampleCount); i++)
             {
@@ -95,13 +96,13 @@ void Worker::stream_data(UNIT * unit)
                           double  value = adc_to_voltage(buffer_info.unit[u].channelSettings[ch].range,
                                                          buffer_info.unit[u].maxSampleValue,
                                                          buffer_info.unit[u].channelSettings[ch].app_buffer[i]);
-                          data_vec[(int)buffer_info.unit[u].channelSettings[ch].mode - 1] = value;
-                          fprintf(file_ptr, "%f\t", value);
+                          data_vec[(int)buffer_info.unit[u].channelSettings[ch].mode-1] = value;
+                          //fprintf(file_ptr, "%f\t", value);
                         }
                     }
                 }
               emit(data(data_vec));
-              fprintf(file_ptr,"\n");
+              //fprintf(file_ptr,"\n");
             }
         }
     }
@@ -123,7 +124,7 @@ void Worker::stream_data(UNIT * unit)
             }
         }
     }
-  fclose(file_ptr);
+  //fclose(file_ptr);
 }
 
 
